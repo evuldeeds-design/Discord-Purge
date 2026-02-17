@@ -1,0 +1,6 @@
+discord-privacy-util
+Discord Privacy Utility
+../dist
+http://localhost:1420
+npm run dev
+npm run build

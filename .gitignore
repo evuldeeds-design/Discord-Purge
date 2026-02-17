@@ -1,0 +1,30 @@
+# Node.js
+node_modules/
+npm-debug.log
+yarn-debug.log
+yarn-error.log
+.pnpm-store/
+dist/
+.env
+.env.local
+
+# Rust
+target/
+**/*.rs.bk
+
+# Tauri
+src-tauri/target/
+
+# Build artifacts
+build/
+pkg/
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# VSCode
+.vscode/
+
+# Gemini CLI temp files
+.gemini/
