@@ -3,7 +3,7 @@
 use tokio::sync::{mpsc, oneshot, Mutex};
 use std::sync::Arc;
 use std::time::Duration;
-use reqwest::{Client, Method, Response};
+use reqwest::{Client, Method, Response, header};
 use tracing::{info, warn, error};
 use crate::core::error::AppError;
 
@@ -13,6 +13,7 @@ pub struct ApiRequest {
     pub url: String,
     pub body: Option<serde_json::Value>,
     pub auth_token: String,
+    pub is_bearer: bool, // true for OAuth2, false for User Tokens
     pub response_tx: oneshot::Sender<Result<reqwest::Response, AppError>>,
 }
 
@@ -40,7 +41,7 @@ impl RateLimiterActor {
             inbox,
             client: Client::new(),
             rate_limit_info: Arc::new(Mutex::new(RateLimitInfo {
-                remaining: 1, // Start with 1 so we can make the first request
+                remaining: 1,
                 reset_after: Duration::from_secs(0),
                 limit: 1,
             })),
@@ -52,22 +53,24 @@ impl RateLimiterActor {
         while let Some(request) = self.inbox.recv().await {
             let mut info = self.rate_limit_info.lock().await;
             
-            // Check if we need to wait
             if info.remaining == 0 {
                 let wait_time = info.reset_after;
                 if wait_time > Duration::from_secs(0) {
                     warn!("Rate limit reached. Waiting for {:?} before next request...", wait_time);
                     tokio::time::sleep(wait_time).await;
-                    // Reset remaining so we can proceed after sleep
-                    // The actual headers will update this after the request.
                     info.remaining = 1; 
                 }
             }
-            drop(info); // Release the lock before making the network call
+            drop(info);
 
-            // Execute the request
-            let mut req_builder = self.client.request(request.method.clone(), &request.url)
-                .bearer_auth(&request.auth_token);
+            // Build request with correct Authorization header
+            let mut req_builder = self.client.request(request.method.clone(), &request.url);
+            
+            if request.is_bearer {
+                req_builder = req_builder.bearer_auth(&request.auth_token);
+            } else {
+                req_builder = req_builder.header(header::AUTHORIZATION, &request.auth_token);
+            }
 
             if let Some(body) = request.body {
                 req_builder = req_builder.json(&body);
@@ -76,14 +79,6 @@ impl RateLimiterActor {
             match req_builder.send().await {
                 Ok(response) => {
                     self.update_rate_limit_info(&response).await;
-
-                    if response.status() == 429 {
-                        warn!("Hit 429 Too Many Requests on {}", request.url);
-                        // In case of 429, we should ideally retry, but for now we'll just send the error back
-                        // or wait and retry if we want to be more sophisticated.
-                        // For the MVP, let's just send the response back and let the caller handle it.
-                    }
-
                     let _ = request.response_tx.send(Ok(response));
                 }
                 Err(e) => {
@@ -116,8 +111,6 @@ impl RateLimiterActor {
             .and_then(|s| s.parse::<u32>().ok()) {
             info.limit = limit;
         }
-
-        // info!("Updated rate limit info: {:?}", *info);
     }
 }
 
@@ -138,6 +131,7 @@ impl ApiHandle {
         url: &str,
         body: Option<serde_json::Value>,
         auth_token: &str,
+        is_bearer: bool,
     ) -> Result<reqwest::Response, AppError> {
         let (response_tx, response_rx) = oneshot::channel();
         
@@ -146,6 +140,7 @@ impl ApiHandle {
             url: url.to_string(),
             body,
             auth_token: auth_token.to_string(),
+            is_bearer,
             response_tx,
         };
 

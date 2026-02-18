@@ -59,6 +59,7 @@ fn main() {
             auth::check_discord_status,
             auth::login_with_token,
             auth::start_qr_login_flow,
+            auth::login_with_rpc,
             api::discord::fetch_guilds,
             api::discord::fetch_channels,
             api::discord::bulk_delete_messages
