@@ -1,3 +1,3 @@
-// src-tauri/src/api/mod.rs
+// src-tauri/src/api.rs
 pub mod rate_limiter;
 pub mod discord;

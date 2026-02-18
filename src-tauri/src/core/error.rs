@@ -91,6 +91,16 @@ impl From<tauri_plugin_opener::Error> for AppError {
     }
 }
 
+impl From<url::ParseError> for AppError {
+    fn from(e: url::ParseError) -> Self {
+        Self {
+            user_message: "An internal error occurred while parsing a URL.".to_string(),
+            error_code: "url_parse_error".to_string(),
+            technical_details: Some(e.to_string()),
+        }
+    }
+}
+
 impl From<oauth2::RequestTokenError<oauth2::reqwest::Error<reqwest::Error>, oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>>> for AppError {
     fn from(e: oauth2::RequestTokenError<oauth2::reqwest::Error<reqwest::Error>, oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>>) -> Self {
         Self {

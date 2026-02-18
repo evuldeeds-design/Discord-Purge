@@ -23,6 +23,8 @@ chrono = { version = "0.4.43", features = ["serde"] }
 sysinfo = "0.38.2"
 tokio-tungstenite = { version = "0.28.0", features = ["rustls-tls-webpki-roots"] }
 futures-util = "0.3.32"
+ring = "0.17.14"
+rustls = { version = "0.23.36", features = ["ring"] }
 
 [build-dependencies]
 tauri-build = { version = "2.5.5", features = [] }

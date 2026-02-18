@@ -9,6 +9,9 @@ use tokio::sync::mpsc;
 use crate::api::rate_limiter::{RateLimiterActor, ApiHandle};
 
 fn main() {
+    // Install the `ring` crypto provider for rustls before any TLS connections are made.
+    let _ = rustls::crypto::CryptoProvider::install_default(rustls::crypto::ring::default_provider());
+
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
