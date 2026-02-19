@@ -1,7 +1,7 @@
 // src-tauri/src/auth/mod.rs
 
 use tauri::{AppHandle, Window, Emitter, Manager};
-use tokio::{sync::oneshot, io::{AsyncReadExt, AsyncWriteExt}};
+use tokio::{sync::oneshot, io::{AsyncReadExt, AsyncWriteExt}, time::{timeout, Duration}};
 use url::Url;
 use std::net::TcpListener;
 use oauth2::{
@@ -37,7 +37,7 @@ pub struct DiscordUser {
     pub email: Option<String>,
 }
 
-const KEYRING_SERVICE: &str = "discord_privacy_util_v3";
+const KEYRING_SERVICE: &str = "discord_privacy_util_v4";
 
 #[tauri::command]
 pub async fn login_with_rpc(app_handle: AppHandle, window: Window) -> Result<DiscordUser, AppError> {
@@ -46,16 +46,17 @@ pub async fn login_with_rpc(app_handle: AppHandle, window: Window) -> Result<Dis
     
     let mut port_found = None;
     for port in 6463..=6472 {
-        if let Ok(_) = tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port)).await {
+        debug!("[RPC] Probing port {}...", port);
+        if let Ok(Ok(_)) = timeout(Duration::from_millis(100), tokio::net::TcpStream::connect(format!("127.0.0.1:{}", port))).await {
             port_found = Some(port);
-            debug!("[RPC] Found Discord listener on port {}", port);
+            info!("[RPC] Found Discord listener on port {}", port);
             break;
         }
     }
 
     let port = port_found.ok_or_else(|| {
-        error!("[RPC] No Discord client detected on common ports.");
-        AppError { user_message: "Discord client not detected.".into(), ..Default::default() }
+        error!("[RPC] Handshake failed: Discord client not detected.");
+        AppError { user_message: "Discord client not detected. Is it open?".into(), ..Default::default() }
     })?;
 
     let url = format!("ws://127.0.0.1:{}/?v=1&client_id={}", port, client_id);
@@ -63,77 +64,72 @@ pub async fn login_with_rpc(app_handle: AppHandle, window: Window) -> Result<Dis
     request.headers_mut().insert("Origin", "https://discord.com".parse().unwrap());
 
     let (ws_stream, _) = connect_async(request).await.map_err(|e| {
-        error!("[RPC] WebSocket connection failed: {}", e);
-        AppError { user_message: "Failed to connect to RPC.".into(), technical_details: Some(e.to_string()), ..Default::default() }
+        error!("[RPC] Connection failed: {}", e);
+        AppError { user_message: "Connection to Discord RPC failed.".into(), technical_details: Some(e.to_string()), ..Default::default() }
     })?;
 
     let (mut write, mut read) = ws_stream.split();
 
-    // 1. READY
-    if let Some(msg) = read.next().await {
-        debug!("[RPC] Gateway response: {:?}", msg);
+    // 1. Receive READY (Wait max 2s)
+    match timeout(Duration::from_secs(2), read.next()).await {
+        Ok(Some(Ok(msg))) => debug!("[RPC] Received Handshake READY: {:?}", msg),
+        _ => return Err(AppError { user_message: "RPC handshake timed out.".into(), ..Default::default() }),
     }
 
     let nonce = Uuid::new_v4().to_string();
     let auth_payload = serde_json::json!({
         "cmd": "AUTHORIZE",
-        "args": {
-            "client_id": client_id,
-            "scopes": ["identify", "guilds"],
-            "prompt": "none"
-        },
+        "args": { "client_id": client_id, "scopes": ["identify", "guilds"], "prompt": "none" },
         "nonce": nonce
     });
     
-    write.send(Message::Text(auth_payload.to_string().into())).await.map_err(|e| {
-        error!("[RPC] Failed to send AUTH: {}", e);
-        AppError::from(e)
-    })?;
+    write.send(Message::Text(auth_payload.to_string().into())).await?;
+    info!("[RPC] Authorization request sent. Awaiting user approval in Discord...");
 
-    while let Some(msg) = read.next().await {
-        let text = match msg {
-            Ok(Message::Text(t)) => t,
-            _ => continue,
-        };
-        
-        let payload: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
-        if payload["nonce"].as_str() == Some(&nonce) {
-            if let Some(code) = payload["data"]["code"].as_str() {
-                info!("[RPC] Code received. Exchanging for token...");
-                let http_client = reqwest::Client::new();
-                let res = http_client.post("https://discord.com/api/oauth2/token")
-                    .form(&[
-                        ("client_id", &client_id),
-                        ("client_secret", &get_discord_client_secret()?),
-                        ("grant_type", &"authorization_code".to_string()),
-                        ("code", &code.to_string()),
-                        ("redirect_uri", &"http://127.0.0.1".to_string()),
-                    ])
-                    .send().await?.json::<serde_json::Value>().await?;
-
-                if let Some(token) = res["access_token"].as_str() {
-                    return login_with_oauth_token(app_handle, window, token.to_string()).await;
-                }
+    // 2. Wait for code (Wait max 30s)
+    let code = match timeout(Duration::from_secs(30), async {
+        while let Some(Ok(Message::Text(text))) = read.next().await {
+            let p: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+            if p["nonce"].as_str() == Some(&nonce) {
+                return p["data"]["code"].as_str().map(|s| s.to_string());
             }
-            break;
         }
-    }
+        None
+    }).await {
+        Ok(code) => code,
+        Err(_) => return Err(AppError { user_message: "Approval timed out.".into(), ..Default::default() }),
+    };
 
-    Err(AppError { user_message: "RPC Auth failed. Did you click Authorize?".into(), ..Default::default() })
+    let code = code.ok_or_else(|| AppError { user_message: "Authorization denied by user.".into(), ..Default::default() })?;
+    
+    info!("[RPC] Authorization code received. Exchanging for token...");
+    let http_client = reqwest::Client::new();
+    let res = http_client.post("https://discord.com/api/oauth2/token")
+        .form(&[
+            ("client_id", &client_id),
+            ("client_secret", &get_discord_client_secret()?),
+            ("grant_type", &"authorization_code".to_string()),
+            ("code", &code),
+            ("redirect_uri", &"http://127.0.0.1".to_string()),
+        ])
+        .send().await?.json::<serde_json::Value>().await?;
+
+    let token = res["access_token"].as_str().ok_or_else(|| AppError { user_message: "Token exchange failed.".into(), ..Default::default() })?;
+    login_with_oauth_token(app_handle, window, token.to_string()).await
 }
 
 #[tauri::command]
 pub async fn start_qr_login_flow(app_handle: AppHandle, window: Window) -> Result<(), AppError> {
-    info!("[QR] Initializing Remote Auth Gateway session...");
+    info!("[QR] Initializing Gateway session...");
     let url = "wss://remote-auth-gateway.discord.gg/?v=2";
     let mut request = url.into_client_request().unwrap();
     let headers = request.headers_mut();
     headers.insert("Origin", "https://discord.com".parse().unwrap());
     headers.insert("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36".parse().unwrap());
 
-    let (ws_stream, _) = connect_async(request).await.map_err(|e| {
-        error!("[QR] Connection failed (Check for 403): {}", e);
-        AppError { user_message: "Login gateway rejected connection (403).".into(), technical_details: Some(e.to_string()), ..Default::default() }
+    let (ws_stream, _) = timeout(Duration::from_secs(5), connect_async(request)).await.map_err(|_| AppError { user_message: "Connection timed out.".into(), ..Default::default() })?.map_err(|e| {
+        error!("[QR] Connection failed: {}", e);
+        AppError { user_message: "Gateway connection failed (403).".into(), technical_details: Some(e.to_string()), ..Default::default() }
     })?;
 
     let (_write, mut read) = ws_stream.split();
@@ -141,35 +137,24 @@ pub async fn start_qr_login_flow(app_handle: AppHandle, window: Window) -> Resul
     let app_handle_clone = app_handle.clone();
 
     tauri::async_runtime::spawn(async move {
-        while let Some(msg) = read.next().await {
-            if let Ok(Message::Text(text)) = msg {
-                if let Ok(p) = serde_json::from_str::<serde_json::Value>(&text) {
-                    match p["op"].as_str() {
-                        Some("hello") => debug!("[QR] Handshake complete."),
-                        Some("fingerprint") => {
-                            if let Some(fp) = p["fingerprint"].as_str() {
-                                debug!("[QR] Fingerprint generated.");
-                                let _ = window_clone.emit("qr_code_ready", format!("https://discord.com/ra/{}", fp));
-                            }
+        while let Some(Ok(Message::Text(text))) = read.next().await {
+            if let Ok(p) = serde_json::from_str::<serde_json::Value>(&text) {
+                match p["op"].as_str() {
+                    Some("hello") => debug!("[QR] Handshake OK"),
+                    Some("fingerprint") => {
+                        if let Some(fp) = p["fingerprint"].as_str() {
+                            let _ = window_clone.emit("qr_code_ready", format!("https://discord.com/ra/{}", fp));
                         }
-                        Some("pending_remote_init") => { 
-                            info!("[QR] Mobile device detected scan.");
-                            let _ = window_clone.emit("qr_scanned", ()); 
+                    },
+                    Some("pending_remote_init") => { let _ = window_clone.emit("qr_scanned", ()); },
+                    Some("finish") => {
+                        if let Some(token) = p["token"].as_str() {
+                            let _ = login_with_user_token(app_handle_clone.clone(), window_clone.clone(), token.to_string()).await;
                         }
-                        Some("finish") => {
-                            if let Some(token) = p["token"].as_str() {
-                                info!("[QR] Remote auth finalized.");
-                                let _ = login_with_user_token(app_handle_clone.clone(), window_clone.clone(), token.to_string()).await;
-                                break;
-                            }
-                        }
-                        Some("cancel") => { 
-                            warn!("[QR] Session cancelled by remote.");
-                            let _ = window_clone.emit("qr_cancelled", ()); 
-                            break; 
-                        }
-                        _ => {}
-                    }
+                        break;
+                    },
+                    Some("cancel") => { let _ = window_clone.emit("qr_cancelled", ()); break; },
+                    _ => {}
                 }
             }
         }
@@ -192,7 +177,8 @@ pub async fn check_discord_status() -> Result<DiscordStatus, AppError> {
 
 #[tauri::command]
 pub async fn login_with_user_token(app_handle: AppHandle, window: Window, token: String) -> Result<DiscordUser, AppError> {
-    info!("[AUTH] Attempting User Token validation...");
+    let token = token.trim().trim_start_matches("Bearer ").to_string();
+    info!("[AUTH] Validating manual user token...");
     let user_profile = validate_token(&app_handle, &token, false).await?;
     let entry = Entry::new(KEYRING_SERVICE, "discord_user")?;
     entry.set_password(&format!("TOKEN={}\nTYPE=user", token))?;
@@ -201,7 +187,6 @@ pub async fn login_with_user_token(app_handle: AppHandle, window: Window, token:
 }
 
 async fn login_with_oauth_token(app_handle: AppHandle, window: Window, token: String) -> Result<DiscordUser, AppError> {
-    info!("[AUTH] Attempting OAuth2 Token validation...");
     let user_profile = validate_token(&app_handle, &token, true).await?;
     let entry = Entry::new(KEYRING_SERVICE, "discord_user")?;
     entry.set_password(&format!("TOKEN={}\nTYPE=oauth", token))?;
@@ -213,62 +198,59 @@ async fn validate_token(app_handle: &AppHandle, token: &str, is_bearer: bool) ->
     let api_handle = app_handle.state::<ApiHandle>();
     let response = api_handle.send_request(reqwest::Method::GET, "https://discord.com/api/users/@me", None, token, is_bearer).await?;
     if !response.status().is_success() {
-        error!("[AUTH] Token validation failed with status: {}", response.status());
-        return Err(AppError { user_message: "Token validation failed.".into(), ..Default::default() });
+        error!("[AUTH] Token validation failed: {}", response.status());
+        return Err(AppError { user_message: "Token is invalid or expired.".into(), ..Default::default() });
     }
     Ok(response.json().await?)
 }
 
 fn get_discord_client_id() -> Result<String, AppError> {
     if let Ok(id) = std::env::var("DISCORD_CLIENT_ID") { return Ok(id); }
-    Entry::new(KEYRING_SERVICE, "client_id")?.get_password().map_err(|_| AppError { user_message: "Client ID missing.".into(), error_code: "credentials_missing".into(), ..Default::default() })
+    Entry::new(KEYRING_SERVICE, "client_id")?.get_password().map_err(|_| AppError { user_message: "Client ID not configured.".into(), error_code: "credentials_missing".into(), ..Default::default() })
 }
 
 fn get_discord_client_secret() -> Result<String, AppError> {
     if let Ok(secret) = std::env::var("DISCORD_CLIENT_SECRET") { return Ok(secret); }
-    Entry::new(KEYRING_SERVICE, "client_secret")?.get_password().map_err(|_| AppError { user_message: "Client Secret missing.".into(), error_code: "credentials_missing".into(), ..Default::default() })
+    Entry::new(KEYRING_SERVICE, "client_secret")?.get_password().map_err(|_| AppError { user_message: "Client Secret not configured.".into(), error_code: "credentials_missing".into(), ..Default::default() })
 }
 
 #[tauri::command]
 pub async fn save_discord_credentials(client_id: String, client_secret: String) -> Result<(), AppError> {
-    info!("[CONFIG] Persisting API credentials to keyring...");
-    Entry::new(KEYRING_SERVICE, "client_id")?.set_password(&client_id)?;
-    Entry::new(KEYRING_SERVICE, "client_secret")?.set_password(&client_secret)?;
+    info!("[CONFIG] Persisting credentials to keyring...");
+    Entry::new(KEYRING_SERVICE, "client_id")?.set_password(&client_id.trim())?;
+    Entry::new(KEYRING_SERVICE, "client_secret")?.set_password(&client_secret.trim())?;
     Ok(())
 }
 
 #[tauri::command]
 pub async fn start_oauth_flow(app_handle: AppHandle, window: Window) -> Result<DiscordUser, AppError> {
-    info!("[OAUTH] Initiating browser flow...");
     let client_id = get_discord_client_id()?;
     let client_secret = get_discord_client_secret()?;
     let client = BasicClient::new(ClientId::new(client_id), Some(ClientSecret::new(client_secret)), AuthUrl::new("https://discord.com/oauth2/authorize".to_string()).unwrap(), Some(TokenUrl::new("https://discord.com/api/oauth2/token".to_string()).unwrap()));
     let (pkce_ch, pkce_ver) = PkceCodeChallenge::new_random_sha256();
-    let csrf = CsrfToken::new_random();
     let listener = TcpListener::bind("127.0.0.1:0")?;
     let port = listener.local_addr()?.port();
     let redirect_url = RedirectUrl::new(format!("http://127.0.0.1:{}", port)).unwrap();
     let client = client.set_redirect_uri(redirect_url);
-    let (auth_url, csrf_state) = client.authorize_url(CsrfToken::new_random).add_scope(oauth2::Scope::new("identify".into())).add_scope(oauth2::Scope::new("guilds".into())).set_pkce_challenge(pkce_ch).url();
+    let (auth_url, _) = client.authorize_url(CsrfToken::new_random).add_scope(oauth2::Scope::new("identify".into())).add_scope(oauth2::Scope::new("guilds".into())).set_pkce_challenge(pkce_ch).url();
 
     let (tx, rx) = oneshot::channel();
-    let csrf_str = csrf_state.secret().to_string();
     tauri::async_runtime::spawn(async move {
         let listener = tokio::net::TcpListener::from_std(listener)?;
-        let (mut stream, _) = listener.accept().await?;
-        let mut buffer = [0; 1024];
-        let n = stream.read(&mut buffer).await?;
-        let req = String::from_utf8_lossy(&buffer[..n]);
-        if let Some(code) = req.split_whitespace().nth(1).and_then(|path| Url::parse(&format!("http://localhost{}", path)).ok()).and_then(|url| url.query_pairs().find_map(|(k, v)| if k == "code" { Some(v.into_owned()) } else { None })) {
-            let _ = tx.send(code);
+        if let Ok(Ok((mut stream, _))) = timeout(Duration::from_secs(60), listener.accept()).await {
+            let mut buffer = [0; 1024];
+            let n = stream.read(&mut buffer).await?;
+            let req = String::from_utf8_lossy(&buffer[..n]);
+            if let Some(code) = req.split_whitespace().nth(1).and_then(|path| Url::parse(&format!("http://localhost{}", path)).ok()).and_then(|url| url.query_pairs().find_map(|(k, v)| if k == "code" { Some(v.into_owned()) } else { None })) {
+                let _ = tx.send(code);
+            }
+            stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nAuthorization success! Returning to app...").await?;
         }
-        stream.write_all(b"HTTP/1.1 200 OK\r\n\r\nSuccess! Returning to app...").await?;
         Ok::<_, AppError>(())
     });
 
     app_handle.opener().open_url(auth_url.to_string(), None::<&str>)?;
-    let code = rx.await.map_err(|e| AppError { user_message: "Auth timeout.".into(), technical_details: Some(e.to_string()), ..Default::default() })?;
-    
+    let code = rx.await.map_err(|_| AppError { user_message: "Auth timed out.".into(), ..Default::default() })?;
     let token_res = client.exchange_code(oauth2::AuthorizationCode::new(code)).set_pkce_verifier(PkceCodeVerifier::new(pkce_ver.secret().to_string())).request_async(oauth2::reqwest::async_http_client).await?;
     login_with_oauth_token(app_handle, window, token_res.access_token().secret().to_string()).await
 }
