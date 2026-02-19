@@ -8,9 +8,10 @@ import * as Tooltip from '@radix-ui/react-tooltip';
 import { 
   Monitor, Smartphone, Key, Globe, ShieldCheck, ShieldAlert, 
   CheckCircle2, XCircle, HelpCircle, ArrowLeft, Info, 
-  Trash2, Server, Hash, Clock, Settings
+  Trash2, Server, Hash, Clock
 } from 'lucide-react';
 
+// ... (Keep existing interfaces for DiscordUser, DiscordStatus, Guild, Channel, DeletionProgress)
 interface DiscordUser {
   id: string;
   username: string;
@@ -47,7 +48,7 @@ const HelpMarker = ({ content }: { content: React.ReactNode }) => (
   <Tooltip.Provider delayDuration={100}>
     <Tooltip.Root>
       <Tooltip.Trigger asChild>
-        <button className="text-gray-500 hover:text-blue-400 transition-colors" type="button">
+        <button className="text-gray-500 hover:text-blue-400 transition-colors p-1" type="button">
           <HelpCircle className="w-4 h-4" />
         </button>
       </Tooltip.Trigger>
@@ -88,6 +89,7 @@ function App() {
   const [qrScanned, setQrScanned] = useState(false);
   const [manualToken, setManualToken] = useState('');
 
+  // ... (Keep existing fetchGuilds, checkDiscordStatus, useEffect hooks)
   const fetchGuilds = async () => {
     try {
       setLoading(true);
@@ -114,7 +116,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const unlisteners = [
+    const unlisteners: Promise<() => void>[] = [
       listen('auth_started', () => { setLoading(true); setError(null); }),
       listen('auth_success', (event) => {
         setAuthenticated(event.payload as DiscordUser);
@@ -171,7 +173,7 @@ function App() {
   const handleLoginToken = async (e: React.FormEvent) => {
     e.preventDefault(); setLoading(true); setError(null);
     try {
-      await invoke('login_with_token', { token: manualToken });
+      await invoke('login_with_user_token', { token: manualToken });
     } catch (err: any) {
       setError(err.user_message || "Token login failed.");
       setLoading(false);
@@ -191,6 +193,7 @@ function App() {
     }
   };
 
+  // ... (Keep existing handleSelectGuild, toggleChannel, startDeletion)
   const handleSelectGuild = async (guild: Guild) => {
     setSelectedGuild(guild); setChannels(null); setSelectedChannels(new Set());
     try {
