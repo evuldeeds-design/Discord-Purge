@@ -3,7 +3,6 @@ import { create } from 'zustand';
 interface AuthState {
   isAuthenticated: boolean;
   needsCredentials: boolean;
-  appMode: 'messages' | 'servers';
   user: { id: string; username: string; avatar?: string; email?: string } | null;
   guilds: any[] | null;
   isLoading: boolean;
@@ -14,13 +13,12 @@ interface AuthState {
   setError: (error: string | null) => void;
   setGuilds: (guilds: any[]) => void;
   setNeedsCredentials: (needs: boolean) => void;
-  setAppMode: (mode: AuthState['appMode']) => void;
+  reset: () => void;
 }
 
 export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
   needsCredentials: false,
-  appMode: 'messages',
   user: null,
   guilds: null,
   isLoading: false,
@@ -31,5 +29,5 @@ export const useAuthStore = create<AuthState>((set) => ({
   setError: (error) => set({ error, isLoading: false }),
   setGuilds: (guilds) => set({ guilds, isLoading: false }),
   setNeedsCredentials: (needs) => set({ needsCredentials: needs, isLoading: false }),
-  setAppMode: (appMode) => set({ appMode }),
+  reset: () => set({ isAuthenticated: false, needsCredentials: false, user: null, guilds: null, isLoading: false, error: null }),
 }));

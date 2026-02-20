@@ -1,1 +1,1 @@
-{}
+{"main-capability":{"identifier":"main-capability","description":"Allows all core functionality for the Privacy Utility.","local":true,"windows":["main"],"permissions":["core:default","shell:default","opener:default","core:event:default","core:window:default","core:app:default","core:path:default","core:webview:default"]}}
