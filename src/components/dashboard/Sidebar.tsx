@@ -62,9 +62,33 @@ export const Sidebar = ({
           </button>
         </div>
 
-        <SectionLabel><Server className="w-3.5 h-3.5" /> Source Handshakes</SectionLabel>
-        <div className="m3-card !p-2 max-h-[calc(100vh-480px)] overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner bg-black/20 border-m3-outlineVariant/20">
-          <button 
+              <div className="flex items-center justify-between px-2">
+                <SectionLabel><Server className="w-3.5 h-3.5" /> Source Handshakes</SectionLabel>
+                <div className="flex gap-2 mb-4">
+                  <button 
+                    onClick={() => guilds?.forEach(g => !selectedGuilds.has(g.id) && onToggleGuildSelection(g))}
+                    className="text-[9px] font-black text-m3-primary uppercase hover:underline"
+                  >
+                    All
+                  </button>
+                  <span className="text-white/10 text-[9px]">|</span>
+                  <button 
+                    onClick={() => {
+                      selectedGuilds.forEach(id => {
+                        if (id === 'dms') onToggleGuildSelection(null);
+                        else {
+                          const g = guilds?.find(guild => guild.id === id);
+                          if (g) onToggleGuildSelection(g);
+                        }
+                      });
+                    }}
+                    className="text-[9px] font-black text-m3-outline uppercase hover:underline"
+                  >
+                    Clear
+                  </button>
+                </div>
+              </div>
+              <div className="m3-card !p-2 max-h-[calc(100vh-520px)] overflow-y-auto custom-scrollbar flex flex-col gap-1.5 shadow-inner bg-black/20 border-m3-outlineVariant/20">          <button 
             onClick={() => onToggleGuildSelection(null)} 
             className={`flex items-center gap-4 p-4 rounded-m3-xl transition-all text-left relative group ${selectedGuilds.has('dms') ? 'bg-m3-primaryContainer text-m3-onPrimaryContainer shadow-lg' : 'hover:bg-m3-surfaceVariant/40 text-m3-onSurfaceVariant'}`}
           >

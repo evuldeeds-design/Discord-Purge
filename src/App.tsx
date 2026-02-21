@@ -24,7 +24,7 @@ import { useDiscordOperations } from './hooks/useDiscordOperations';
 function App() {
   const { 
     isAuthenticated, user, guilds, isLoading, error, 
-    setAuthenticated, setError, addLog 
+    setAuthenticated, setError, addLog, showDevLog, toggleDevLog 
   } = useAuthStore();
 
   const {
@@ -85,7 +85,7 @@ function App() {
     };
     setup(); 
     return () => unlisteners.forEach(u => u && u());
-  }, [setAuthenticated, fetchGuilds, fetchRelationships, fetchIdentities, getOperationStatus, setView, setIsProcessing, setProgress, setError]);
+  }, [setAuthenticated, fetchGuilds, fetchRelationships, fetchIdentities, getOperationStatus, setView, setIsProcessing, setProgress, setError, addLog, setQrUrl]);
 
   useEffect(() => {
     if (mode === 'identity') fetchRelationships();
@@ -99,9 +99,9 @@ function App() {
             <div className="absolute inset-0 bg-m3-primary/5 pointer-events-none blur-[150px] rounded-full scale-150" />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="flex flex-col items-center gap-16 w-full max-w-5xl relative z-10">
               <div className="text-center space-y-4">
-                <motion.h1 layoutId="title" className="text-7xl font-black tracking-tighter text-white uppercase italic leading-none shadow-[0_0_30px_rgba(255,255,255,0.1)]">Discord Burner</motion.h1>
+                <motion.h1 layoutId="title" className="text-7xl font-black tracking-tighter text-white uppercase italic leading-none shadow-[0_0_30px_rgba(255,255,255,0.1)]">Discord Purge</motion.h1>
                 <p className="text-xs text-m3-primary font-bold uppercase tracking-[0.8em] flex items-center justify-center gap-4 opacity-60">
-                  <div className="w-12 h-px bg-m3-primary/40" />Privacy Enforcement Tool v1.1<div className="w-12 h-px bg-m3-primary/40" />
+                  <div className="w-12 h-px bg-m3-primary/40" />Privacy Enforcement Unit v5.1<div className="w-12 h-px bg-m3-primary/40" />
                 </p>
               </div>
               <AnimatePresence mode="wait">
@@ -151,7 +151,16 @@ function App() {
             <div className="m3-card-elevated !bg-m3-errorContainer !text-m3-onErrorContainer !border-none flex items-center gap-6 shadow-[0_30px_100px_rgba(0,0,0,0.8)] p-8 rounded-[2.5rem] relative overflow-hidden group">
               <div className="absolute top-0 left-0 w-full h-1 bg-m3-onErrorContainer/20 group-hover:h-2 transition-all" />
               <div className="p-3 bg-m3-onErrorContainer/10 rounded-full shadow-inner"><ShieldAlert className="w-8 h-8 text-m3-onErrorContainer drop-shadow-[0_0_10px_rgba(96,20,16,0.4)]" /></div>
-              <div className="flex-1 min-w-0"><p className="text-[10px] font-black uppercase tracking-[0.4em] leading-none mb-2 italic">System Alert</p><p className="text-xs font-bold opacity-90 leading-relaxed uppercase tracking-tight">{error}</p></div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-black uppercase tracking-[0.4em] leading-none mb-2 italic">System Alert</p>
+                <p className="text-xs font-bold opacity-90 leading-relaxed uppercase tracking-tight">{error}</p>
+                <button 
+                  onClick={() => { if (!showDevLog) toggleDevLog(); }}
+                  className="mt-3 text-[9px] font-black uppercase tracking-widest bg-m3-onErrorContainer/10 hover:bg-m3-onErrorContainer/20 px-3 py-1.5 rounded-full transition-colors border border-m3-onErrorContainer/20"
+                >
+                  View Protocol Log
+                </button>
+              </div>
               <IconButton icon={XCircle} onClick={() => setError(null)} className="!text-m3-onErrorContainer hover:!bg-m3-onErrorContainer/10 !p-4 !rounded-[1.5rem]" />
             </div>
           </motion.div>

@@ -3,6 +3,13 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAuthStore } from '../store/authStore';
 import { DiscordStatus, DiscordIdentity, DiscordUser } from '../types/discord';
 
+/**
+ * Custom hook for managing the Discord authentication lifecycle.
+ * Handles primary login flows (OAuth2, RPC, QR, Token), identity listing,
+ * and automatic status detection of the Discord desktop client.
+ * 
+ * @returns An object containing auth-related state and handlers.
+ */
 export const useDiscordAuth = () => {
   const { 
     setAuthenticated, setLoading, setError, reset, isLoading, view, setView 
@@ -16,6 +23,10 @@ export const useDiscordAuth = () => {
   const [clientSecret, setClientSecret] = useState('');
   const [manualToken, setManualToken] = useState('');
 
+  /**
+   * Transforms raw API errors into user-friendly messages while
+   * logging deep technical details to the developer console.
+   */
   const formatApiError = (err: any, fallback: string) => {
     const msg = typeof err === 'string' ? err : (err.user_message || fallback);
     const detail = err.technical_details ? ` (${err.technical_details})` : "";
@@ -39,6 +50,10 @@ export const useDiscordAuth = () => {
     setLoading(false);
   }, [setError, setLoading]);
 
+  /**
+   * Triggers background Discord desktop client detection.
+   * Includes exponential backoff retry logic for resilience.
+   */
   const checkStatus = useCallback(async () => { 
     try { 
       const status = await invoke<DiscordStatus>('check_discord_status');
@@ -71,6 +86,11 @@ export const useDiscordAuth = () => {
     setView('manual'); 
   };
 
+  /**
+   * Protocol: Official Gate (OAuth2)
+   * Securely authorizes the app via Discord's web portal.
+   * Requires a developer Application ID and Secret.
+   */
   const handleLoginOAuth = async () => { 
     setLoading(true); 
     setError(null); 
@@ -87,6 +107,10 @@ export const useDiscordAuth = () => {
     } 
   };
 
+  /**
+   * Protocol: QR Signature
+   * Bridges mobile authorization via Discord's remote auth gateway.
+   */
   const handleLoginQR = async () => { 
     setView('qr'); 
     setQrUrl(null); 
@@ -99,6 +123,9 @@ export const useDiscordAuth = () => {
     } 
   };
 
+  /**
+   * Signal the backend to terminate an active QR authorization session.
+   */
   const handleCancelQR = async () => {
     setLoading(false);
     setView('auth');
@@ -109,6 +136,10 @@ export const useDiscordAuth = () => {
     }
   };
 
+  /**
+   * Protocol: Local Handshake (RPC)
+   * Rapid zero-config link via the running Discord desktop client.
+   */
   const handleLoginRPC = async () => { 
     setLoading(true); 
     setError(null); 
@@ -124,6 +155,10 @@ export const useDiscordAuth = () => {
     } 
   };
 
+  /**
+   * Protocol: Bypass Mode (User Token)
+   * Manually inject a User Token for high-level private buffer access (DMs/Friends).
+   */
   const handleLoginToken = async (e: React.FormEvent) => { 
     e.preventDefault(); 
     setLoading(true); 
@@ -179,6 +214,7 @@ export const useDiscordAuth = () => {
     handleLoginToken,
     handleSaveConfig,
     handleSwitchIdentity,
-    handleApiError
+    handleApiError,
+    setQrUrl
   };
 };

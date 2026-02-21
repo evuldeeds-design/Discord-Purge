@@ -110,9 +110,24 @@ export const MessagesMode = ({
       <div className="flex flex-col gap-4 flex-1">
         <div className="flex items-center justify-between px-2">
           <SectionLabel><Hash className="w-3.5 h-3.5" /> Target Buffers</SectionLabel>
-          <button onClick={onMapAll} className="text-[10px] font-black text-m3-primary uppercase underline mb-4">Map All</button>
+          <div className="flex gap-2 mb-4">
+            <button 
+              onClick={onMapAll}
+              className="text-[9px] font-black text-m3-primary uppercase hover:underline"
+            >
+              All
+            </button>
+            <span className="text-white/10 text-[9px]">|</span>
+            <button 
+              onClick={() => Array.from(channelsByGuild.values()).flat().forEach(c => selectedChannels.has(c.id) && onToggleChannel(c.id))}
+              className="text-[9px] font-black text-m3-outline uppercase hover:underline"
+            >
+              Clear
+            </button>
+          </div>
         </div>
         <div className="m3-card !p-2 !bg-black/30 border-m3-outlineVariant/20 flex-1 overflow-y-auto custom-scrollbar min-h-[200px]">
+          {/* ... (channels rendering) ... */}
           {Array.from(channelsByGuild.entries()).map(([guildId, guildChannels]) => (
             <div key={guildId} className="mb-6 last:mb-0">
               {channelsByGuild.size > 1 && (
@@ -168,7 +183,7 @@ export const MessagesMode = ({
               {simulation ? 'Simulation Run' : 'Security Required'}
             </h4>
             <p className="text-[10px] text-m3-onSurfaceVariant font-bold uppercase tracking-widest mt-2 px-10 leading-relaxed">
-              Authorized for <span className="text-white underline decoration-m3-error decoration-2 underline-offset-4">{selectedChannels.size} buffers</span>. {simulation ? 'No data will be destroyed.' : 'Permanent purge protocol.'}
+              Authorized for <span className="text-white underline decoration-m3-error decoration-2 underline-offset-4">{selectedChannels.size} buffers</span> across <span className="text-white">{channelsByGuild.size} sources</span>. {simulation ? 'No data will be destroyed.' : 'Permanent purge protocol.'}
             </p>
           </div>
           <div className="w-full space-y-4">

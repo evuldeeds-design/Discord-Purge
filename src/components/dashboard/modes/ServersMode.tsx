@@ -115,11 +115,17 @@ export const ServersMode = ({
 
       {firstSelectedGuild && firstSelectedId !== 'dms' && currentChannels.length > 0 && (
         <div className="flex flex-col gap-8 pt-8 border-t border-m3-outlineVariant/30 px-4">
-          <SectionLabel><Hammer className="w-3.5 h-3.5" /> Audit Log Burial: {firstSelectedGuild.name}</SectionLabel>
-          <div className="space-y-4">
-            <p className="text-[10px] text-m3-onSurfaceVariant font-bold uppercase tracking-widest leading-relaxed">
-              Select a channel to perform random renames to flood the audit log. Requires server manage permissions.
+          <div className="space-y-2">
+            <SectionLabel><Hammer className="w-3.5 h-3.5" /> Audit Log Burial: {firstSelectedGuild.name}</SectionLabel>
+            <p className="text-[10px] text-m3-primary/60 font-bold uppercase tracking-tight ml-2 italic">
+              Mechanism: Triggers rapid cyclic renames to flood the server audit log, pushing sensitive entries out of immediate view.
             </p>
+          </div>
+          <div className="space-y-4">
+            <p className="text-[10px] text-m3-onSurfaceVariant font-bold uppercase tracking-widest leading-relaxed bg-white/5 p-4 rounded-m3-md border border-white/5">
+              <span className="text-m3-error mr-2">REQUIRED:</span> 'Manage Channels' permission. Select a target node below to begin the burial protocol.
+            </p>
+            {/* ... (channels list) ... */}
             <div className="m3-card !p-2 !bg-black/30 border-m3-outlineVariant/20 overflow-y-auto custom-scrollbar min-h-[100px] max-h-[200px] shadow-inner">
               <div className="grid grid-cols-1 gap-2 p-1">
                 {currentChannels.filter(c => c.channel_type === 0).map(c => (
@@ -144,7 +150,7 @@ export const ServersMode = ({
               disabled={selectedChannels.size !== 1 || isLoading || isProcessing}
               className="m3-button-primary !py-5 !bg-m3-secondary !text-m3-onSecondary w-full"
             >
-              <Hammer className="w-4 h-4" /> Bury Audit Log
+              <Hammer className="w-4 h-4" /> Initialize Burial Protocol
             </button>
           </div>
         </div>
@@ -152,17 +158,22 @@ export const ServersMode = ({
 
       {firstSelectedGuild && firstSelectedId !== 'dms' && (
         <div className="flex flex-col gap-8 pt-8 border-t border-m3-outlineVariant/30 px-4">
-          <SectionLabel><Cloud className="w-3.5 h-3.5" /> Webhook Ghosting: {firstSelectedGuild.name}</SectionLabel>
+          <div className="space-y-2">
+            <SectionLabel><Cloud className="w-3.5 h-3.5" /> Webhook Ghosting: {firstSelectedGuild.name}</SectionLabel>
+            <p className="text-[10px] text-m3-primary/60 font-bold uppercase tracking-tight ml-2 italic">
+              Mechanism: Scans all node integrations and permanently nullifies any webhooks linked to your current identity.
+            </p>
+          </div>
           <div className="space-y-4">
-            <p className="text-[10px] text-m3-onSurfaceVariant font-bold uppercase tracking-widest leading-relaxed">
-              Detect and delete webhooks created by your identity within this server. Requires server manage permissions.
+            <p className="text-[10px] text-m3-onSurfaceVariant font-bold uppercase tracking-widest leading-relaxed bg-white/5 p-4 rounded-m3-md border border-white/5">
+              <span className="text-m3-error mr-2">REQUIRED:</span> 'Manage Webhooks' permission. This action is deep and irreversible.
             </p>
             <button 
               onClick={onWebhookGhosting} 
               disabled={isLoading || isProcessing}
               className="m3-button-primary !py-5 !bg-m3-tertiary !text-m3-onTertiary w-full"
             >
-              <Cloud className="w-4 h-4" /> Purge Webhooks
+              <Cloud className="w-4 h-4" /> Purge Identity Webhooks
             </button>
           </div>
         </div>

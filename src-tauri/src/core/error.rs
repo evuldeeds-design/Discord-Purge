@@ -115,6 +115,16 @@ impl From<tokio::time::error::Elapsed> for AppError {
     }
 }
 
+impl From<serde_json::Error> for AppError {
+    fn from(e: serde_json::Error) -> Self {
+        Self {
+            user_message: "Data parsing error.".into(),
+            error_code: "json_error".into(),
+            technical_details: Some(e.to_string()),
+        }
+    }
+}
+
 impl From<oauth2::RequestTokenError<oauth2::reqwest::Error<reqwest::Error>, oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>>> for AppError {
     fn from(e: oauth2::RequestTokenError<oauth2::reqwest::Error<reqwest::Error>, oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>>) -> Self {
         Self {

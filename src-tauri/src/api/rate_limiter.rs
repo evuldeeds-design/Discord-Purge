@@ -42,7 +42,7 @@ impl Default for BucketInfo {
 pub struct RateLimiterActor {
     inbox: mpsc::Receiver<ApiRequest>,
     client: Client,
-    buckets: Arc<Mutex<HashMap<String, BucketInfo>>>,
+    buckets: Arc<Mutex<HashMap<String, Arc<Mutex<BucketInfo>>>>>,
     global_reset_at: Arc<Mutex<Instant>>,
     app_handle: tauri::AppHandle,
 }
@@ -68,7 +68,6 @@ impl RateLimiterActor {
         
         if let Some(pos) = segments.iter().position(|&s| s == "channels") {
             if let Some(id) = segments.get(pos + 1) {
-                // If it's a messages endpoint, include that in the route
                 if segments.get(pos + 2) == Some(&"messages") {
                     return format!("channels/{}/messages", id);
                 }
@@ -84,6 +83,8 @@ impl RateLimiterActor {
             return "relationships".to_string();
         }
         if segments.contains(&"@me") {
+            if segments.contains(&"guilds") { return "users/@me/guilds".into(); }
+            if segments.contains(&"channels") { return "users/@me/channels".into(); }
             return "users/@me".to_string();
         }
         
@@ -91,113 +92,120 @@ impl RateLimiterActor {
     }
 
     pub async fn run(&mut self) {
-        Logger::info(&self.app_handle, "[LIM] RateLimiterActor operational.", None);
+        Logger::info(&self.app_handle, "[LIM] Engine Dispatcher active", None);
+        
         while let Some(request) = self.inbox.recv().await {
+            let client = self.client.clone();
+            let buckets_map = self.buckets.clone();
+            let global_throttle = self.global_reset_at.clone();
+            let app_handle = self.app_handle.clone();
             let route = Self::get_route(&request.url);
-            let mut retry_count = 0;
-            const MAX_RETRIES: u32 = 3;
-            
-            loop {
-                let now = Instant::now();
-                
-                // 1. Global Throttle
-                {
-                    let global = self.global_reset_at.lock().await;
-                    if now < *global {
-                        let wait = *global - now;
-                        Logger::debug(&self.app_handle, &format!("[LIM] Global throttle active. Waiting {:?}", wait), None);
-                        tokio::time::sleep(wait).await;
-                        continue;
-                    }
-                }
 
-                // 2. Bucket Throttle
-                {
-                    let mut buckets = self.buckets.lock().await;
-                    let bucket = buckets.entry(route.clone()).or_default();
-                    
-                    if now >= bucket.reset_at {
-                        bucket.remaining = bucket.limit;
-                    }
+            tokio::spawn(async move {
+                let mut retry_count = 0;
+                const MAX_RETRIES: u32 = 3;
 
-                    if bucket.remaining == 0 {
-                        let wait = bucket.reset_at.saturating_duration_since(now);
-                        if wait.is_zero() {
-                            bucket.remaining = bucket.limit; 
-                        } else {
-                            Logger::warn(&self.app_handle, &format!("[LIM] Bucket '{}' exhausted. Resets in {:?}. Waiting...", route, wait), None);
-                            drop(buckets);
-                            tokio::time::sleep(wait + Duration::from_millis(100)).await;
+                loop {
+                    let now = Instant::now();
+
+                    // 1. Global Wait
+                    {
+                        let global = global_throttle.lock().await;
+                        if now < *global {
+                            let wait = *global - now;
+                            tokio::time::sleep(wait).await;
                             continue;
                         }
                     }
-                    bucket.remaining = bucket.remaining.saturating_sub(1);
-                }
 
-                // 3. Execution
-                Logger::debug(&self.app_handle, &format!("[LIM] [{}] EXEC: {}", request.method, request.url), Some(serde_json::json!({ "route": route })));
-                let mut req_builder = self.client.request(request.method.clone(), &request.url);
-                if request.is_bearer {
-                    req_builder = req_builder.bearer_auth(&request.auth_token);
-                } else {
-                    req_builder = req_builder.header(header::AUTHORIZATION, &request.auth_token);
-                }
-                if let Some(body) = request.body.clone() {
-                    req_builder = req_builder.json(&body);
-                }
+                    // 2. Bucket Synchronization
+                    let bucket_arc = {
+                        let mut map = buckets_map.lock().await;
+                        map.entry(route.clone()).or_insert_with(|| Arc::new(Mutex::new(BucketInfo::default()))).clone()
+                    };
 
-                // Add minimal delay for destructive actions to avoid burst triggers
-                if request.method != Method::GET {
-                    let jitter = rand::thread_rng().gen_range(100..300);
-                    tokio::time::sleep(Duration::from_millis(jitter)).await;
-                }
-
-                match req_builder.send().await {
-                    Ok(response) => {
-                        let status = response.status();
-                        let is_429 = status.as_u16() == 429;
-                        
-                        Logger::trace(&self.app_handle, &format!("[LIM] Response: {} | URL: {}", status, request.url), None);
-                        self.update_limits(&route, &response, is_429).await;
-
-                        if is_429 {
-                            let body_text = response.text().await.unwrap_or_else(|_| "Could not read 429 body".to_string());
-                            Logger::warn(&self.app_handle, &format!("[LIM] 429 HIT: {}", request.url), Some(serde_json::json!({ "body": body_text })));
-                            continue; 
+                    {
+                        let mut bucket = bucket_arc.lock().await;
+                        if now >= bucket.reset_at {
+                            bucket.remaining = bucket.limit;
                         }
 
-                        if !status.is_success() && status.is_server_error() && retry_count < MAX_RETRIES {
-                            retry_count += 1;
-                            Logger::warn(&self.app_handle, &format!("[LIM] Server error ({}). Retry {}/{}...", status, retry_count, MAX_RETRIES), None);
-                            tokio::time::sleep(Duration::from_secs(retry_count as u64)).await;
-                            continue;
+                        if bucket.remaining == 0 {
+                            let wait = bucket.reset_at.saturating_duration_since(now);
+                            if !wait.is_zero() {
+                                Logger::trace(&app_handle, &format!("[LIM] Delaying for bucket '{}'", route), None);
+                                drop(bucket);
+                                tokio::time::sleep(wait + Duration::from_millis(50)).await;
+                                continue;
+                            }
                         }
-
-                        let _ = request.response_tx.send(Ok(response));
-                        break; 
+                        bucket.remaining = bucket.remaining.saturating_sub(1);
                     }
-                    Err(e) => {
-                        if retry_count < MAX_RETRIES {
-                            retry_count += 1;
-                            Logger::warn(&self.app_handle, &format!("[LIM] Transport error: {}. Retry {}/{}...", e, retry_count, MAX_RETRIES), None);
-                            tokio::time::sleep(Duration::from_secs(retry_count as u64)).await;
-                            continue;
+
+                    // 3. Execution
+                    let mut req_builder = client.request(request.method.clone(), &request.url);
+                    if request.is_bearer {
+                        req_builder = req_builder.bearer_auth(&request.auth_token);
+                    } else {
+                        req_builder = req_builder.header(header::AUTHORIZATION, &request.auth_token);
+                    }
+                    if let Some(body) = request.body.clone() {
+                        req_builder = req_builder.json(&body);
+                    }
+
+                    // Strategic Jitter for non-GET requests
+                    if request.method != Method::GET {
+                        let jitter = rand::thread_rng().gen_range(150..400);
+                        tokio::time::sleep(Duration::from_millis(jitter)).await;
+                    }
+
+                    match req_builder.send().await {
+                        Ok(response) => {
+                            let status = response.status();
+                            let is_429 = status.as_u16() == 429;
+                            
+                            Self::process_headers(&app_handle, &route, &response, &bucket_arc, &global_throttle, is_429).await;
+
+                            if is_429 {
+                                Logger::warn(&app_handle, &format!("[LIM] Rate limit hit on {}", route), None);
+                                continue; 
+                            }
+
+                            if !status.is_success() && status.is_server_error() && retry_count < MAX_RETRIES {
+                                retry_count += 1;
+                                tokio::time::sleep(Duration::from_secs(retry_count as u64)).await;
+                                continue;
+                            }
+
+                            let _ = request.response_tx.send(Ok(response));
+                            break; 
                         }
-                        Logger::error(&self.app_handle, &format!("[LIM] Fatal error for {}: {}", request.url, e), None);
-                        let _ = request.response_tx.send(Err(AppError::from(e)));
-                        break;
+                        Err(e) => {
+                            if retry_count < MAX_RETRIES {
+                                retry_count += 1;
+                                tokio::time::sleep(Duration::from_secs(retry_count as u64)).await;
+                                continue;
+                            }
+                            let _ = request.response_tx.send(Err(AppError::from(e)));
+                            break;
+                        }
                     }
                 }
-            }
+            });
         }
     }
 
-    async fn update_limits(&self, route: &str, response: &Response, is_429: bool) {
+    async fn process_headers(
+        app: &tauri::AppHandle,
+        route: &str,
+        response: &Response,
+        bucket_arc: &Arc<Mutex<BucketInfo>>,
+        global_throttle: &Arc<Mutex<Instant>>,
+        is_429: bool
+    ) {
         let headers = response.headers();
         let now = Instant::now();
-        
-        let mut buckets = self.buckets.lock().await;
-        let bucket = buckets.entry(route.to_string()).or_default();
+        let mut bucket = bucket_arc.lock().await;
 
         if is_429 {
             bucket.consecutive_429s += 1;
@@ -205,26 +213,14 @@ impl RateLimiterActor {
             bucket.consecutive_429s = 0;
         }
 
-        let mut updated = false;
         if let Some(rem) = headers.get("X-RateLimit-Remaining").and_then(|h| h.to_str().ok()).and_then(|s| s.parse::<u32>().ok()) {
             bucket.remaining = rem;
-            updated = true;
         }
         if let Some(reset) = headers.get("X-RateLimit-Reset-After").and_then(|h| h.to_str().ok()).and_then(|s| s.parse::<f32>().ok()) {
             bucket.reset_at = now + Duration::from_secs_f32(reset);
-            updated = true;
         }
         if let Some(lim) = headers.get("X-RateLimit-Limit").and_then(|h| h.to_str().ok()).and_then(|s| s.parse::<u32>().ok()) {
             bucket.limit = lim;
-            updated = true;
-        }
-
-        if updated {
-            Logger::trace(&self.app_handle, &format!("[LIM] Bucket '{}' updated", route), Some(serde_json::json!({
-                "remaining": bucket.remaining,
-                "limit": bucket.limit,
-                "resets_in": bucket.reset_at.duration_since(now).as_secs_f32()
-            })));
         }
 
         if is_429 {
@@ -234,23 +230,18 @@ impl RateLimiterActor {
                 .unwrap_or(1.0);
             
             let mut wait = Duration::from_secs_f32(retry_after);
-            
             if bucket.consecutive_429s > 1 {
-                let backoff = 2u64.pow(bucket.consecutive_429s.min(6));
-                wait += Duration::from_secs(backoff);
+                wait += Duration::from_secs(2u64.pow(bucket.consecutive_429s.min(5)));
             }
 
-            Logger::warn(&self.app_handle, &format!("[LIM] [{}] RATE LIMIT HIT", route), Some(serde_json::json!({
-                "wait": wait.as_secs_f32(),
-                "consecutive": bucket.consecutive_429s
-            })));
-
             if headers.get("X-RateLimit-Global").and_then(|h| h.to_str().ok()) == Some("true") {
-                let mut g = self.global_reset_at.lock().await;
+                let mut g = global_throttle.lock().await;
                 *g = now + wait;
+                Logger::error(app, &format!("[LIM] GLOBAL RATE LIMIT. Locking for {:?}", wait), None);
             } else {
                 bucket.remaining = 0;
                 bucket.reset_at = now + wait;
+                Logger::warn(app, &format!("[LIM] Route '{}' limited for {:?}", route, wait), None);
             }
         }
     }

@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use oauth2::{
     basic::BasicClient,
     AuthUrl, ClientId, ClientSecret, CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, TokenUrl,
-    TokenResponse
+    TokenResponse,
 };
 use serde::{Serialize, Deserialize};
 use tauri_plugin_opener::OpenerExt;
@@ -51,27 +51,29 @@ pub struct DiscordUser {
 pub async fn login_with_rpc(app_handle: AppHandle, window: Window) -> Result<DiscordUser, AppError> {
     Logger::info(&app_handle, "[RPC] Handshake sequence started.", None);
     let client_id = Vault::get_credential(&app_handle, "client_id")?;
-    Logger::debug(&app_handle, &format!("[RPC] Using client_id: {}", client_id), None);
     
-    let port = (6463..=6472).find(|p| {
-        let ok = std::net::TcpStream::connect(format!("127.0.0.1:{}", p)).is_ok();
-        if ok { Logger::debug(&app_handle, &format!("[RPC] Detected Discord on port: {}", p), None); }
-        ok
-    });
+    let port = (6463..=6472).find(|p| std::net::TcpStream::connect(format!("127.0.0.1:{}", p)).is_ok());
     let port = port.ok_or_else(|| AppError { user_message: "Discord desktop client not detected.".into(), ..Default::default() })?;
 
     let url = format!("ws://127.0.0.1:{}/?v=1&client_id={}", port, client_id);
-    Logger::debug(&app_handle, &format!("[RPC] Connecting to WebSocket: {}", url), None);
-    
     let mut request = url.into_client_request().unwrap();
     request.headers_mut().insert("Origin", "https://discord.com".parse().unwrap());
 
+    Logger::debug(&app_handle, &format!("[RPC] Connecting to port {}", port), None);
     let (ws_stream, _) = timeout(Duration::from_secs(5), connect_async(request)).await??;
     let (mut write, mut read) = ws_stream.split();
     
-    // Wait for READY
-    Logger::debug(&app_handle, "[RPC] Connected. Waiting for READY payload...", None);
-    let _ = timeout(Duration::from_secs(2), read.next()).await;
+    // Wait for DISPATCH READY
+    match timeout(Duration::from_secs(2), read.next()).await {
+        Ok(Some(Ok(Message::Text(text)))) => {
+            if let Ok(p) = serde_json::from_str::<serde_json::Value>(&text) {
+                if p["evt"].as_str() == Some("READY") {
+                    Logger::debug(&app_handle, "[RPC] Link established with desktop client", None);
+                }
+            }
+        },
+        _ => Logger::warn(&app_handle, "[RPC] READY event not received, attempting to proceed...", None),
+    }
 
     let nonce = Uuid::new_v4().to_string();
     let auth_payload = serde_json::json!({
@@ -89,32 +91,33 @@ pub async fn login_with_rpc(app_handle: AppHandle, window: Window) -> Result<Dis
                 trace!("[RPC] Msg: {}", text);
                 if let Ok(p) = serde_json::from_str::<serde_json::Value>(&text) {
                     if p["nonce"].as_str() == Some(&nonce) {
-                        return p["data"]["code"].as_str().map(|s| s.to_string());
+                        if let Some(err) = p["data"]["message"].as_str() {
+                            return Some(Err(err.to_string()));
+                        }
+                        return p["data"]["code"].as_str().map(|s| Ok(s.to_string()));
                     }
                 }
             }
         }
         None
     }).await {
-        Ok(res) => res,
+        Ok(Some(res)) => res,
         _ => {
             Logger::error(&app_handle, "[RPC] Handshake timed out after 30s", None);
             return Err(AppError { user_message: "RPC authorization timed out.".into(), ..Default::default() });
         }
     };
 
-    // Explicitly join and close to avoid "sending after closing" errors on drop
     if let Ok(mut ws_stream) = write.reunite(read) {
-        Logger::debug(&app_handle, "[RPC] Closing stream", None);
         let _ = timeout(Duration::from_secs(1), ws_stream.close(None)).await;
     }
 
-    let code = code.ok_or_else(|| {
-        Logger::error(&app_handle, "[RPC] Auth denied or code missing", None);
-        AppError { user_message: "RPC authorization was denied.".into(), ..Default::default() }
+    let code = code.map_err(|e| {
+        Logger::error(&app_handle, &format!("[RPC] Authorization denied: {}", e), None);
+        AppError { user_message: format!("RPC denied: {}", e), ..Default::default() }
     })?;
     
-    debug!("[RPC] Code received. Exchanging...");
+    Logger::debug(&app_handle, "[RPC] Code received. Exchanging for token...", None);
     let client_secret = Vault::get_credential(&app_handle, "client_secret")?;
     
     let http_client = reqwest::Client::new();
@@ -158,25 +161,34 @@ pub async fn start_qr_login_flow(app_handle: AppHandle, window: Window, state: t
 
     Logger::debug(&app_handle, &format!("[QR] Connecting: {}", url), None);
     let (ws_stream, _) = timeout(Duration::from_secs(10), connect_async(request)).await??;
-    let (_write, mut read) = ws_stream.split();
+    let (mut write, mut read) = ws_stream.split();
     let window_clone = window.clone();
     let app_handle_clone = app_handle.clone();
 
     tauri::async_runtime::spawn(async move {
+        let mut heartbeat_interval = tokio::time::interval(Duration::from_secs(30));
         loop {
             tokio::select! {
                 _ = cancel_token.cancelled() => {
                     Logger::info(&app_handle_clone, "[QR] Session cancelled", None);
                     break;
                 }
+                _ = heartbeat_interval.tick() => {
+                    let _ = write.send(Message::Text(serde_json::json!({"op": "heartbeat"}).to_string().into())).await;
+                }
                 msg = read.next() => {
                     match msg {
                         Some(Ok(Message::Text(text))) => {
                             if let Ok(p) = serde_json::from_str::<serde_json::Value>(&text) {
                                 match p["op"].as_str() {
+                                    Some("hello") => {
+                                        let interval = p["heartbeat_interval"].as_u64().unwrap_or(30000);
+                                        heartbeat_interval = tokio::time::interval(Duration::from_millis(interval));
+                                        Logger::debug(&app_handle_clone, "[QR] Handshake complete", None);
+                                    },
                                     Some("fingerprint") => {
                                         if let Some(fp) = p["fingerprint"].as_str() {
-                                            Logger::debug(&app_handle_clone, "[QR] Fingerprint received", None);
+                                            Logger::debug(&app_handle_clone, "[QR] Fingerprint generated", None);
                                             let _ = window_clone.emit("qr_code_ready", format!("https://discord.com/ra/{}", fp));
                                         }
                                     },
@@ -247,7 +259,7 @@ async fn validate_token(app_handle: &AppHandle, token: &str, is_bearer: bool) ->
     let api_handle = app_handle.state::<ApiHandle>();
     let response = api_handle.send_request(reqwest::Method::GET, "https://discord.com/api/v9/users/@me", None, token, is_bearer).await?;
     if !response.status().is_success() {
-        Logger::error(app_handle, "[Auth] Token validation failed", None);
+        Logger::error(app_handle, "[Auth] Token validation failed", Some(serde_json::json!({"status": response.status().as_u16()})));
         return Err(AppError { user_message: "Token invalid or expired.".into(), ..Default::default() });
     }
     Ok(response.json().await?)

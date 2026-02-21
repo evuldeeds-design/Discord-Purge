@@ -1,149 +1,66 @@
-<div align="center">
-  <img src="https://raw.githubusercontent.com/evuldeeds-design/Discord-Purge/main/src-tauri/icons/icon.png" alt="Discord Purge Logo" width="150">
-  <h1 align="center">Discord Purge</h1>
-  <p align="center">
-    The ultimate tool for taking control of your Discord data.
-    <br />
-    <a href="https://github.com/evuldeeds-design/Discord-Purge/releases">View Releases</a>
-    ·
-    <a href="https://github.com/evuldeeds-design/Discord-Purge/issues">Report Bug</a>
-    ·
-    <a href="https://github.com/evuldeeds-design/Discord-Purge/issues">Request Feature</a>
-  </p>
-</div>
+# Discord Purge: Privacy Enforcement Unit
 
-<div align="center">
+[![Release](https://img.shields.io/github/v/release/evuldeeds-design/Discord-Purge?style=for-the-badge)](https://github.com/evuldeeds-design/Discord-Purge/releases)
+[![License](https://img.shields.io/github/license/evuldeeds-design/Discord-Purge?style=for-the-badge)](LICENSE)
+[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-blue?style=for-the-badge)](https://github.com/evuldeeds-design/Discord-Purge/releases)
 
-[![Build Status](https://github.com/evuldeeds-design/Discord-Purge/actions/workflows/main.yml/badge.svg)](https://github.com/evuldeeds-design/Discord-Purge/actions/workflows/main.yml)
-[![MIT License](https://img.shields.io/badge/License-MIT-green.svg)](https://choosealicense.com/licenses/mit/)
+A high-performance, high-security desktop utility designed for deep Discord privacy management. Built with **Rust** and **Tauri** for maximum efficiency and unyielding security.
 
-</div>
+## 🚀 Key Protocols
 
----
+-   **Official Gate (OAuth2)**: Secure, standard authorization for managing public guilds and profile data.
+-   **Bypass Mode (User Token)**: High-level access for private buffers including DMs, group chats, and bulk relationship severance.
+-   **Local Handshake (RPC)**: Zero-config rapid link using your active Discord desktop process.
+-   **QR Signature**: Secure mobile-bridge login via Discord's remote auth gateway.
 
-## About The Project
+## 🛠 Features
 
-**Discord Purge** is a high-performance desktop application built to empower users with ultimate control over their digital footprint on Discord. It connects directly to Discord's API, providing a suite of powerful, privacy-focused tools wrapped in a clean, modern, and intuitive interface.
+-   **Bulk Message Deletion**: High-speed, rate-limit aware purging of messages across multiple channels and servers simultaneously.
+-   **Connection Severance**: Rapidly leave multiple servers at once while maintaining a whitelist of essential nodes.
+-   **Identity Purge**: Bulk relationship severance (friends/blocks) to clear your social footprint.
+-   **Engine Tools**:
+    -   **Audit Log Burial**: Cyclic node renames to flood and mask server audit history.
+    -   **Webhook Ghosting**: Detection and removal of identity-linked integrations.
+    -   **Stealth Wipes**: Automated profile masking (status, DMs, presence).
 
-Whether you're looking to clean up old conversations, manage your server presence, or perform a full GDPR-compliant data scrub, this utility provides the tools to do it safely and efficiently.
+## 🔒 Security Architecture
 
-<br>
+-   **OS Vault Integration**: Sensitive tokens and application secrets are stored exclusively in the host OS keychain (Windows Credential Manager / macOS Keychain). No plain-text secrets reside on disk.
+-   **Rate Limit Engine**: A granular, multi-threaded Rust dispatcher ensures your account remains safe with exponential backoff and speculative bucket tracking.
+-   **Transparency**: A real-time **System Protocol Log** provides a deep technical trace of every handshake and API interaction.
 
-### ❤️ Support The Project
+## 📥 Installation
 
-If this tool is useful to you and you appreciate the time saved, please consider showing your support!
+Download the latest production build for your platform from the [Releases](https://github.com/evuldeeds-design/Discord-Purge/releases) page.
 
-<a href="https://www.buymeacoffee.com/evuldeeds">
-  <img src="https://img.buymeacoffee.com/button-api/?text=Buy me a coffee&emoji=&slug=evuldeeds&button_colour=5F7FFF&font_colour=ffffff&font_family=Poppins&outline_colour=000000&coffee_colour=FFDD00" alt="Buy Me A Coffee" />
-</a>
+### Windows
+-   Download `.msi` or `.exe`
+-   Install and launch `Discord Privacy Utility`
 
----
+### macOS
+-   Download `.dmg`
+-   Drag to Applications
 
-## ✨ Features
+### Linux
+-   Download `.AppImage` or `.deb`
+-   `chmod +x` and execute
 
--   **Multi-Authentication:** Log in via the official, secure **OAuth2** flow, or use **Bypass Mode** with a user token for deep-level access to DMs and friend lists.
--   **Bulk Message Deletion:**
-    -   Select multiple servers, DMs, and group chats in a single operation.
-    -   Filter messages by date range ("Last 24 Hours," "Last 7 Days," "All Time," or custom).
-    -   Filter by keyword or only delete messages with attachments.
-    -   **Simulation Mode:** Perform a safe dry run to see what would be deleted without actually removing any data.
--   **Bulk Server Departure:** Quickly leave multiple servers at once while whitelisting the ones you want to stay in.
--   **Bulk Friend Removal:** Clean up your friends list with a simple, powerful bulk removal tool.
--   **Privacy & GDPR Tools:**
-    -   **Profile Wipe:** A guided flow to help you permanently delete your Discord account.
-    -   **GDPR Request:** A helper to guide you through the process of requesting your data package and submitting a compliant GDPR deletion request to Discord.
--   **Advanced Tools:**
-    -   **Audit Log Burial:** Flood a server's audit log with rapid channel renames to bury previous actions.
-    -   **Webhook Ghosting:** Find and delete all webhooks created by you on a server.
+## 🏗 Developer Setup
 
----
+```bash
+# Clone the repository
+git clone https://github.com/evuldeeds-design/Discord-Purge.git
 
-## 🖼️ Screenshots
+# Install dependencies
+npm install
 
-*(Add screenshots or GIFs of the application in action here)*
-
-<details>
-  <summary>Click to expand screenshots</summary>
-  
-  _Placeholder: Screenshot of the login screen_
-  
-  _Placeholder: Screenshot of the message deletion dashboard_
-  
-</details>
-
----
-
-## 🛠️ Tech Stack
-
-This project is built with a focus on performance and security, using modern, cutting-edge technologies.
-
-| Tech               | Category         |
-| ------------------ | ---------------- |
-| **Rust**           | Backend Language |
-| **Tauri**          | Desktop Framework|
-| **React**          | Frontend Library |
-| **TypeScript**     | Frontend Language|
-| **Vite**           | Build Tool       |
-| **Tailwind CSS**   | Styling          |
-| **Zustand**        | State Management |
-| **Framer Motion**  | Animations       |
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
--   Windows, macOS, or Linux operating system.
-
-### Installation
-
-1.  Go to the [**Latest Release**](https://github.com/evuldeeds-design/Discord-Purge/releases/latest) page.
-2.  Download the appropriate installer for your operating system (`.msi` for Windows, `.dmg` for macOS, `.AppImage` or `.deb` for Linux).
-3.  Run the installer and follow the on-screen instructions.
-
----
-
-## 👨‍💻 For Developers
-
-Interested in contributing? Here’s how to get the project running locally.
-
-### Prerequisites
-
--   **Node.js** (v18.x or later)
--   **Rust** and **Cargo**: [https://www.rust-lang.org/tools/install](https://www.rust-lang.org/tools/install)
--   (Windows) **WebView2**: Should be installed on modern Windows systems.
--   (Linux) Required dependencies for Tauri: `sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.0-dev build-essential curl wget libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev`
-
-### Local Development Setup
-
-1.  **Clone the repository:**
-    ```sh
-    git clone https://github.com/evuldeeds-design/Discord-Purge.git
-    cd Discord-Purge
-    ```
-
-2.  **Install frontend dependencies:**
-    ```sh
-    npm install
-    ```
-
-3.  **Run the development server:**
-    ```sh
-    npm run tauri dev
-    ```
-    The application will compile and launch in a development window with hot-reloading enabled for both the frontend and backend.
-
----
-
-## 🤝 Contributing
-
-Contributions are what make the open-source community such an amazing place to learn, inspire, and create. Any contributions you make are **greatly appreciated**.
-
-Please see the `CONTRIBUTING.md` file for guidelines (TODO: Create this file).
-
----
+# Launch in Development Mode (requires Rust installed)
+npm run tauri dev
+```
 
 ## 📜 License
 
-This project is distributed under the MIT License. See `LICENSE.txt` for more information. (Note: You can choose a different license if you prefer).
+Distributed under the MIT License. See `LICENSE` for more information.
+
+---
+*Created for the Privacy Enforcement Unit.*
